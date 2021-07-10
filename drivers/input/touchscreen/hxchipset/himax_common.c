@@ -27,8 +27,11 @@
 #define FRAME_COUNT 5
 #define COMMON_BUF_SZ 80
 
+
 #if defined(HX_AUTO_UPDATE_FW)
-char *i_CTPM_firmware_name = "Himax_firmware.bin";
+//char *i_CTPM_firmware_name = "himax_firmware.bin";
+char *i_CTPM_firmware_name = "TP1803_NUBIA_JDI_FW.i";
+
 const struct firmware *i_CTPM_FW;
 #endif
 
@@ -438,9 +441,9 @@ int himax_input_register(struct himax_ts_data *ts)
 #else
 	set_bit(MT_TOOL_FINGER, ts->input_dev->keybit);
 #if defined(HX_PROTOCOL_B_3PA)
-	input_mt_init_slots(ts->input_dev, HX_TOUCH_ID_MAX, INPUT_MT_DIRECT);
+	input_mt_init_slots(ts->input_dev, ts->nFinger_support, INPUT_MT_DIRECT);
 #else
-	input_mt_init_slots(ts->input_dev, HX_TOUCH_ID_MAX);
+	input_mt_init_slots(ts->input_dev, ts->nFinger_support);
 #endif
 #endif
 	D("input_set_abs_params: mix_x %d, max_x %d, min_y %d, max_y %d\n",
@@ -501,16 +504,30 @@ static void calculate_point_number(void)
 		HX_TOUCH_INFO_POINT_CNT += ((ic_data->HX_MAX_PT / 4) + 1) * 4;
 }
 
+extern int nubia_panel_id;
+
 #ifdef HX_AUTO_UPDATE_FW
+unsigned char i_JDI_CTPM_FW[]=
+{
+#include "TP1803_NUBIA_JDI_FW.i"
+};
 static int i_update_FW(void)
 {
 	int upgrade_times = 0;
-	unsigned char *ImageBuffer = NULL;
-	int fullFileLength = 0;
 	int ret = 0, result = 0;
 	uint32_t i_FW_VER = 0, i_CFG_VER = 0;
-
-	D("file name = %s\n", i_CTPM_firmware_name);
+	unsigned char *ImageBuffer = i_JDI_CTPM_FW;
+	int fullFileLength = sizeof(i_JDI_CTPM_FW);
+	if(nubia_panel_id == 0)
+	{
+	    ImageBuffer = i_JDI_CTPM_FW;
+            fullFileLength = sizeof(i_JDI_CTPM_FW);
+	}
+	else if(nubia_panel_id != 0)
+	{
+		return 0;
+	}
+	/*D("file name = %s\n", i_CTPM_firmware_name);
 	if (request_firmware(&i_CTPM_FW, i_CTPM_firmware_name,
 		private_ts->dev)) {
 		I("%s: no firmware file\n", __func__);
@@ -518,17 +535,26 @@ static int i_update_FW(void)
 	}
 
 	fullFileLength = i_CTPM_FW->size;
-	ImageBuffer = (unsigned char *)i_CTPM_FW->data;
+	ImageBuffer = (unsigned char *)i_CTPM_FW->data;*/
+	if(ImageBuffer==NULL || fullFileLength!=FW_SIZE_64k)
+	{
+		I("%s: no firmware file\n", __func__);
+		return OPEN_FILE_FAIL;
+	}
+	
+	I("%s: i_fullFileLength = %d\n", __func__,fullFileLength);
 
 	i_FW_VER = (ImageBuffer[FW_VER_MAJ_FLASH_ADDR] << 8)
 			| ImageBuffer[FW_VER_MIN_FLASH_ADDR];
 	i_CFG_VER = (ImageBuffer[CFG_VER_MAJ_FLASH_ADDR] << 8)
 			| ImageBuffer[CFG_VER_MIN_FLASH_ADDR];
 
+	D("FW_VER 0x%x, CFG_VER 0x%x\n", i_FW_VER, i_CFG_VER);
 	if ((ic_data->vendor_fw_ver >= i_FW_VER)
 		&& (ic_data->vendor_config_ver >= i_CFG_VER)) {
-		D("FW_VER 0x%x, CFG_VER 0x%x\n", i_FW_VER, i_CFG_VER);
-		release_firmware(i_CTPM_FW);
+		D("OLD:FW_VER 0x%x, CFG_VER 0x%x\n", ic_data->vendor_fw_ver, ic_data->vendor_config_ver);
+		D("NEW:FW_VER 0x%x, CFG_VER 0x%x\n", i_FW_VER, i_CFG_VER);
+		//release_firmware(i_CTPM_FW);
 		return 0;
 	}
 
@@ -545,8 +571,8 @@ update_retry:
 		ret = g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_124k(ImageBuffer, fullFileLength, false);
 	else if (fullFileLength == FW_SIZE_128k)
 		ret = g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_128k(ImageBuffer, fullFileLength, false);
-
-	release_firmware(i_CTPM_FW);
+	else
+		D("Nothing to do for fw update:ret=%d\n", ret);
 
 	if (ret == 0) {
 		upgrade_times++;
@@ -1942,9 +1968,16 @@ int himax_chip_common_init(void)
 #if defined(HX_AUTO_UPDATE_FW) || defined(HX_ZERO_FLASH)
 	bool auto_update_flag = false;
 #endif
-	int err = -1;
+	int ret = 0, err = -1;
 	struct himax_ts_data *ts = private_ts;
-	struct himax_i2c_platform_data *pdata = ts->pdata;
+	struct himax_i2c_platform_data *pdata;
+
+	D("PDATA START\n");
+	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
+	if (pdata == NULL) { /* Allocate Platform data space */
+		err = -ENOMEM;
+		goto err_dt_platform_data_fail;
+	}
 
 	D("ic_data START\n");
 	ic_data = kzalloc(sizeof(*ic_data), GFP_KERNEL);
@@ -1958,6 +1991,12 @@ int himax_chip_common_init(void)
 	if (hx_touch_data == NULL) {
 		err = -ENOMEM;
 		goto err_alloc_touch_data_failed;
+	}
+
+	if (himax_parse_dt(ts, pdata) < 0) {
+		E(" pdata is NULL for DT\n");
+		err = -ECANCELED;
+		goto err_alloc_dt_pdata_failed;
 	}
 
 #ifdef HX_RST_PIN_FUNC
@@ -1992,6 +2031,9 @@ int himax_chip_common_init(void)
 		goto error_ic_detect_failed;
 	}
 
+	if (pdata->virtual_key)
+		ts->button = pdata->virtual_key;
+
 	g_core_fp.fp_read_FW_ver();
 
 #ifdef HX_AUTO_UPDATE_FW
@@ -2018,13 +2060,41 @@ int himax_chip_common_init(void)
 #ifdef CONFIG_OF
 	ts->power = pdata->power;
 #endif
-
+	ts->pdata = pdata;
 	ts->x_channel = ic_data->HX_RX_NUM;
 	ts->y_channel = ic_data->HX_TX_NUM;
 	ts->nFinger_support = ic_data->HX_MAX_PT;
 	/* calculate the i2c data size */
 	calcDataSize(ts->nFinger_support);
 	D("%s: calcDataSize complete\n", __func__);
+#ifdef CONFIG_OF
+	ts->pdata->abs_pressure_min        = 0;
+	ts->pdata->abs_pressure_max        = 200;
+	ts->pdata->abs_width_min           = 0;
+	ts->pdata->abs_width_max           = 200;
+	pdata->cable_config[0]             = 0xF0;
+	pdata->cable_config[1]             = 0x00;
+#endif
+	ts->suspended                      = false;
+#if defined(HX_USB_DETECT_CALLBACK) || defined(HX_USB_DETECT_GLOBAL)
+	ts->usb_connected = 0x00;
+	ts->cable_config = pdata->cable_config;
+#endif
+#ifdef	HX_PROTOCOL_A
+	ts->protocol_type = PROTOCOL_TYPE_A;
+#else
+	ts->protocol_type = PROTOCOL_TYPE_B;
+#endif
+	D("%s: Use Protocol Type %c\n", __func__,
+	  ts->protocol_type == PROTOCOL_TYPE_A ? 'A' : 'B');
+
+	ret = himax_input_register(ts);
+	if (ret) {
+		E("%s: Unable to register %s input device\n",
+		  __func__, ts->input_dev->name);
+		err = ret;
+		goto err_input_register_device_failed;
+	}
 
 #ifdef HX_SMART_WAKEUP
 	ts->SMWP_enable = 0;
@@ -2067,15 +2137,16 @@ int himax_chip_common_init(void)
 	if (err)
 		goto err_register_interrupt_failed;
 
+
 #ifdef CONFIG_TOUCHSCREEN_HIMAX_DEBUG
 	if (himax_debug_init())
 		E(" %s: debug initial failed!\n", __func__);
 #endif
 
-	return 0;
 
+	return 0;
 err_register_interrupt_failed:
-	remove_proc_entry(HIMAX_PROC_TOUCH_FOLDER, NULL);
+remove_proc_entry(HIMAX_PROC_TOUCH_FOLDER, NULL);
 err_creat_proc_file_failed:
 err_report_data_init_failed:
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_ITO_TEST)
@@ -2085,12 +2156,15 @@ err_ito_test_wq_failed:
 #ifdef HX_SMART_WAKEUP
 	wakeup_source_trash(&ts->ts_SMWP_wake_src);
 #endif
+err_input_register_device_failed:
+	input_free_device(ts->input_dev);
 err_detect_failed:
 #ifdef HX_AUTO_UPDATE_FW
 	if (auto_update_flag) {
 		cancel_delayed_work_sync(&ts->work_update);
 		destroy_workqueue(ts->himax_update_wq);
 	}
+
 #endif
 
 error_ic_detect_failed:
@@ -2098,18 +2172,23 @@ error_ic_detect_failed:
 		gpio_free(pdata->gpio_irq);
 
 #ifdef HX_RST_PIN_FUNC
+
 	if (gpio_is_valid(pdata->gpio_reset))
 		gpio_free(pdata->gpio_reset);
+
 #endif
 
 #ifndef CONFIG_OF
 err_power_failed:
 #endif
 
+err_alloc_dt_pdata_failed:
 	kfree(hx_touch_data);
 err_alloc_touch_data_failed:
 	kfree(ic_data);
 err_dt_ic_data_fail:
+	kfree(pdata);
+err_dt_platform_data_fail:
 	probe_fail_flag = 1;
 	return err;
 }
@@ -2176,10 +2255,6 @@ int himax_chip_common_suspend(struct himax_ts_data *ts)
 		I("%s: Already suspended. Skipped.\n", __func__);
 		return 0;
 	}
-
-#ifdef HX_ESD_RECOVERY
-	HX_ESD_RESET_ACTIVATE = 0;
-#endif
 
 	ts->suspended = true;
 	D("%s: enter\n", __func__);

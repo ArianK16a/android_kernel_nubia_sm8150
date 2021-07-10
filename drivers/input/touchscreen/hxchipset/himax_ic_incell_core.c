@@ -760,7 +760,7 @@ static int himax_mcu_chip_self_test(void)
 
 	if (test_result_id == pfw_op->data_selftest_pass[0]) {
 		I("[Himax]: self-test pass\n");
-		pf_value = 0x0;
+		pf_value = 0x1;
 	} else {
 		E("[Himax]: self-test fail\n");
 		/*
@@ -768,7 +768,7 @@ static int himax_mcu_chip_self_test(void)
 		 *  tmp_data[1],tmp_data[2],tmp_data[3],tmp_data[4],tmp_data[5],tmp_data[6],tmp_data[7],
 		 *  tmp_data[8],tmp_data[9],tmp_data[10]);
 		 */
-		pf_value = 0x1;
+		pf_value = 0x0;
 	}
 
 	/* Enable IDLE Mode */
@@ -1848,7 +1848,7 @@ END_FUNCTION:
 
 static void himax_mcu_esd_ic_reset(void)
 {
-	HX_ESD_RESET_ACTIVATE = 1;
+	HX_ESD_RESET_ACTIVATE = 0;
 #ifdef HX_RST_PIN_FUNC
 	himax_mcu_pin_reset();
 #endif

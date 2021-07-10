@@ -30,9 +30,9 @@
 #define HIMAX_I2C_RETRY_TIMES 10
 
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_DEBUG)
-#define D(x...) pr_debug("[HXTP] " x)
-#define I(x...) pr_info("[HXTP] " x)
-#define W(x...) pr_warn("[HXTP][WARNING] " x)
+#define D(x...) printk("[HXTP] " x)
+#define I(x...) printk("[HXTP] " x)
+#define W(x...) printk("[HXTP][WARNING] " x)
 #define E(x...) pr_err("[HXTP][ERROR] " x)
 #define DIF(x...) \
 do { \

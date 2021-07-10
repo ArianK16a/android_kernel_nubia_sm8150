@@ -17,12 +17,20 @@
 #include "himax_debug.h"
 #include "himax_ic_core.h"
 
+
 static struct proc_dir_entry *himax_proc_debug_level_file;
 static struct proc_dir_entry *himax_proc_vendor_file;
 static struct proc_dir_entry *himax_proc_attn_file;
 static struct proc_dir_entry *himax_proc_int_en_file;
 static struct proc_dir_entry *himax_proc_layout_file;
 static struct proc_dir_entry *himax_proc_CRC_test_file;
+static struct proc_dir_entry *nubia_proc_ic_ver_file;
+static struct proc_dir_entry *nubia_proc_DC_data_file;
+static struct proc_dir_entry *nubia_proc_BASEDC_data_file;
+static struct proc_dir_entry *nubia_proc_IIR_data_file;
+static struct proc_dir_entry *nubia_proc_user_update_file;
+static struct proc_dir_entry *nubia_proc_ic_detect_file;
+
 
 #ifdef HX_RST_PIN_FUNC
 	extern void himax_ic_reset(uint8_t loadconfig, uint8_t int_off);
@@ -80,6 +88,7 @@ uint8_t diag_coor[128];
 int32_t diag_self[100] = {0};
 int32_t diag_self_new[100] = {0};
 int32_t diag_self_old[100] = {0};
+int g_diag_command = 0;
 int32_t *getMutualBuffer(void);
 int32_t *getMutualNewBuffer(void);
 int32_t *getMutualOldBuffer(void);
@@ -116,7 +125,12 @@ static uint8_t getFlashDumpProgress(void);
 static uint8_t getFlashReadStep(void);
 static void setFlashCommand(uint8_t command);
 static void setFlashReadStep(uint8_t step);
-
+static ssize_t nubia_diag_write(int num);
+static void himax_diag_arrange(struct seq_file *s);
+void himax_get_mutual_edge(void);
+void himax_get_self_edge(void);
+static void print_state_info(struct seq_file *s);
+int in_self_test = 0;
 uint32_t **raw_data_array;
 uint8_t X_NUM, Y_NUM;
 uint8_t sel_type = 0x0D;
@@ -131,6 +145,7 @@ struct proc_dir_entry *himax_proc_SENSE_ON_OFF_file;
 	#define HIMAX_PROC_ESD_CNT_FILE "ESD_cnt"
 	struct proc_dir_entry *himax_proc_ESD_cnt_file;
 #endif
+
 
 #define COMMON_BUF_SZ 80
 #define PROC_DD_BUF_SZ 20
@@ -309,6 +324,303 @@ static const struct file_operations himax_proc_CRC_test_ops = {
 	.owner = THIS_MODULE,
 	.read = himax_CRC_test_read,
 };
+
+#ifdef NUBIA_TP_HIMAX_PROC_IC_VER
+static ssize_t himax_ic_ver_read(struct file *file, char __user *buf, size_t len, loff_t *pos)
+{
+	ssize_t ret = 0;
+	char *temp_buf;
+
+	if (HX_PROC_SEND_FLAG) {
+		HX_PROC_SEND_FLAG = 0;
+		return 0;
+	}
+
+	temp_buf = kzalloc(len, GFP_KERNEL);
+	if (!temp_buf) {
+		E("%s: allocate memory failed!\n", __func__);
+		return 0;
+	}
+	I("FW_VER = 0x%2.2X\n", ic_data->vendor_fw_ver);
+
+	//if (private_ts->chip_cell_type == CHIP_IS_ON_CELL)
+		//ret += snprintf(temp_buf + ret, len - ret, "CONFIG_VER = 0x%2.2X\n", ic_data->vendor_config_ver);
+	I("TOUCH_VER = 0x%2.2X\n", ic_data->vendor_touch_cfg_ver);
+	I("DISPLAY_VER = 0x%2.2X\n", ic_data->vendor_display_cfg_ver);
+	//else {
+		ret += snprintf(temp_buf + ret, len - ret, "firmware_id:%x\n", ic_data->vendor_touch_cfg_ver);
+		ret += snprintf(temp_buf + ret, len - ret, "config_id:%x\n", ic_data->vendor_display_cfg_ver);
+	I("CONFIG_VER = 0x%2.2X\n", ic_data->vendor_config_ver);
+	//ret = snprintf(temp_buf + ret, len - ret,"firmware_id:%x\nconfig_id:%x\n",
+					//ic_data->vendor_touch_cfg_ver, ic_data->vendor_display_cfg_ver);
+	//}
+
+	if (ic_data->vendor_cid_maj_ver < 0 && ic_data->vendor_cid_min_ver < 0)
+		ret += snprintf(temp_buf + ret, len - ret, "CID_VER = NULL\n");
+	else
+		ret += snprintf(temp_buf + ret, len - ret, "CID_VER = 0x%2.2X\n", (ic_data->vendor_cid_maj_ver << 8 | ic_data->vendor_cid_min_ver));
+
+	if (ic_data->vendor_panel_ver < 0)
+		ret += snprintf(temp_buf + ret, len - ret, "PANEL_VER = NULL\n");
+	else
+		ret += snprintf(temp_buf + ret, len - ret, "PANEL_VER = 0x%2.2X\n", ic_data->vendor_panel_ver);
+
+	ret += snprintf(temp_buf + ret, len - ret, "\n");
+	ret += snprintf(temp_buf + ret, len - ret, "Himax Touch Driver Version:\n");
+	ret += snprintf(temp_buf + ret, len - ret, "%s\n", HIMAX_DRIVER_VER);
+	HX_PROC_SEND_FLAG = 1;
+
+	if (copy_to_user(buf, temp_buf, len))
+		I("%s,here:%d\n", __func__, __LINE__);
+
+	kfree(temp_buf);
+
+	return ret;
+}
+
+static const struct file_operations himax_proc_ic_ver_ops = {
+	.owner = THIS_MODULE,
+	.read = himax_ic_ver_read,
+};
+
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_DC_DATA
+static void *nubia_DC_data_seq_start(struct seq_file *s, loff_t *pos)
+{
+    if (*pos>=1) return NULL;
+    return (void *)((unsigned long) *pos+1);
+}
+
+static void *nubia_DC_data_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+    return NULL;
+}
+static void nubia_DC_data_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int nubia_DC_data_seq_read(struct seq_file *s, void *v)
+{
+    size_t count = 0;
+    uint16_t mutual_num, self_num, width;
+    int dsram_type = 0;
+    struct himax_ts_data *ts = private_ts;
+
+    if(ts->suspended){
+        I("%s: touch has suspended\n", __func__);
+        return count;
+    }
+
+    nubia_diag_write(2);
+    msleep(200);
+
+    dsram_type = g_diag_command/10;
+
+    mutual_num	= x_channel * y_channel;
+    self_num	= x_channel + y_channel; //don't add KEY_COUNT
+    width		= x_channel;
+    seq_printf(s, "ChannelStart: %4d, %4d\n\n", x_channel, y_channel);
+
+    // start to show out the raw data in adb shell
+    if ((g_diag_command >= 1 && g_diag_command <= 3) || (g_diag_command == 7))
+    {
+        himax_diag_arrange(s);
+        seq_printf(s, "\n");
+        seq_printf(s, "ChannelEnd");
+        seq_printf(s, "\n");
+    }
+
+    if((g_diag_command >= 1 && g_diag_command <= 7) || dsram_type > 0)
+    {
+        /* print Mutual/Slef Maximum and Minimum */
+        himax_get_mutual_edge();
+        himax_get_self_edge();
+        seq_printf(s, "Mutual Max:%3d, Min:%3d\n",g_max_mutual,g_min_mutual);
+        seq_printf(s, "Self Max:%3d, Min:%3d\n",g_max_self,g_min_self);
+
+        /* recovery status after print*/
+        g_max_mutual = 0;
+        g_min_mutual = 255;
+        g_max_self = 0;
+        g_min_self = 255;
+    }
+    /*pring state info*/
+    print_state_info(s);
+    return count;
+}
+
+static struct seq_operations nubia_DC_data_seq_ops =
+{
+    .start	= nubia_DC_data_seq_start,
+    .next	= nubia_DC_data_seq_next,
+    .stop	= nubia_DC_data_seq_stop,
+    .show	= nubia_DC_data_seq_read,
+};
+
+static int nubia_DC_data_proc_open(struct inode *inode, struct file *file)
+{
+    return seq_open(file, &nubia_DC_data_seq_ops);
+};
+
+static struct file_operations nubia_DC_data_ops =
+{
+    .owner = THIS_MODULE,
+    .open = nubia_DC_data_proc_open,
+    .read = seq_read,
+};
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_BASEDC_DATA
+static void *nubia_BASEDC_data_seq_start(struct seq_file *s, loff_t *pos)
+{
+    if (*pos>=1) return NULL;
+    return (void *)((unsigned long) *pos+1);
+}
+
+static void *nubia_BASEDC_data_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+    return NULL;
+}
+static void nubia_BASEDC_data_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int nubia_BASEDC_data_seq_read(struct seq_file *s, void *v)
+{
+    size_t count = 0;
+    uint16_t mutual_num, self_num, width;
+    int dsram_type = 0;
+    struct himax_ts_data *ts = private_ts;
+
+    if(ts->suspended){
+        I("%s: touch has suspended\n", __func__);
+        return count;
+    }
+
+    nubia_diag_write(3);
+    msleep(200);
+
+    dsram_type = g_diag_command/10;
+
+    mutual_num	= x_channel * y_channel;
+    self_num	= x_channel + y_channel; //don't add KEY_COUNT
+    width		= x_channel;
+    seq_printf(s, "ChannelStart: %4d, %4d\n\n", x_channel, y_channel);
+
+    // start to show out the raw data in adb shell
+    if ((g_diag_command >= 1 && g_diag_command <= 3) || (g_diag_command == 7))
+    {
+        himax_diag_arrange(s);
+        seq_printf(s, "\n");
+        seq_printf(s, "ChannelEnd");
+        seq_printf(s, "\n");
+    }
+
+    if((g_diag_command >= 1 && g_diag_command <= 7) || dsram_type > 0)
+    {
+        /* print Mutual/Slef Maximum and Minimum */
+        himax_get_mutual_edge();
+        himax_get_self_edge();
+        seq_printf(s, "Mutual Max:%3d, Min:%3d\n",g_max_mutual,g_min_mutual);
+        seq_printf(s, "Self Max:%3d, Min:%3d\n",g_max_self,g_min_self);
+
+        /* recovery status after print*/
+        g_max_mutual = 0;
+        g_min_mutual = 255;
+        g_max_self = 0;
+        g_min_self = 255;
+    }
+    /*pring state info*/
+    print_state_info(s);
+    return count;
+}
+
+static struct seq_operations nubia_BASEDC_data_seq_ops =
+{
+    .start	= nubia_BASEDC_data_seq_start,
+    .next	= nubia_BASEDC_data_seq_next,
+    .stop	= nubia_BASEDC_data_seq_stop,
+    .show	= nubia_BASEDC_data_seq_read,
+};
+
+static int nubia_BASEDC_data_proc_open(struct inode *inode, struct file *file)
+{
+    return seq_open(file, &nubia_BASEDC_data_seq_ops);
+};
+
+static struct file_operations nubia_BASEDC_data_ops =
+{
+    .owner = THIS_MODULE,
+    .open = nubia_BASEDC_data_proc_open,
+    .read = seq_read,
+};
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_IC_DETECT
+static void *nubia_ic_detect_seq_start(struct seq_file *s, loff_t *pos)
+{
+    if (*pos>=1) return NULL;
+    return (void *)((unsigned long) *pos+1);
+}
+
+static void *nubia_ic_detect_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+    return NULL;
+}
+static void nubia_ic_detect_seq_stop(struct seq_file *s, void *v)
+{
+}
+static int nubia_ic_detect_seq_read(struct seq_file *s, void *v)
+{
+	int retval = -EINVAL;
+	int val=0x00;
+	size_t count = 0;
+	struct himax_ts_data *ts = private_ts;
+
+	if(ts->suspended){
+		I("%s: touch has suspended\n", __func__);
+		return count;
+	}
+	himax_int_enable(0);//disable irq
+	//g_self_test_entered = 1;
+	//in_self_test = 1;
+	val = g_core_fp.fp_chip_self_test();
+#ifdef HX_ESD_RECOVERY
+	HX_ESD_RESET_ACTIVATE = 1;
+#endif
+	himax_int_enable(1);//enable irq
+
+	if (val == 0x01)
+		retval = 0;
+	else
+		retval = 1;
+	//g_self_test_entered = 0;
+	//in_self_test = 0;
+	seq_printf(s, "%d\n\n", retval);
+	return count;
+}
+
+static struct seq_operations nubia_ic_detect_seq_ops =
+{
+	.start	= nubia_ic_detect_seq_start,
+	.next	= nubia_ic_detect_seq_next,
+	.stop	= nubia_ic_detect_seq_stop,
+	.show	= nubia_ic_detect_seq_read,
+};
+
+static int nubia_ic_detect_proc_open(struct inode *inode, struct file *file)
+{
+    return seq_open(file, &nubia_ic_detect_seq_ops);
+};
+
+static struct file_operations nubia_proc_ic_detect_ops =
+{
+	.owner = THIS_MODULE,
+	.open = nubia_ic_detect_proc_open,
+	.read = seq_read,
+};
+#endif
 
 static ssize_t himax_vendor_read(struct file *file, char __user *buf, size_t len, loff_t *pos)
 {
@@ -1565,6 +1877,199 @@ void himax_ts_diag_func(void)
 	}
 }
 
+static ssize_t nubia_diag_write(int num)
+{
+	struct himax_ts_data *ts = private_ts;
+	char messages[COMMON_BUF_SZ] = {0};
+	struct filename *vts_name;
+	uint8_t command[2] = {0x00, 0x00};
+	uint8_t receive[1];
+	/* 0: common , other: dsram */
+	int storage_type = 0;
+	/* 1:IIR,2:DC,3:Bank,4:IIR2,5:IIR2_N,6:FIR2,7:Baseline,8:dump coord */
+	int rawdata_type = 0;
+
+	memset(receive, 0x00, sizeof(receive));
+
+	//if (len >= COMMON_BUF_SZ) {
+	//	I("%s: no command exceeds 80 chars.\n", __func__);
+	//	return -EFAULT;
+	//}
+
+	//if (copy_from_user(messages, buff, len))
+		//return -EFAULT;
+
+	I("%s:g_switch_mode = %d\n", __func__, g_switch_mode);
+
+	if (messages[1] == 0x0A)
+		ts->diag_cmd = messages[0] - '0';
+	else
+		ts->diag_cmd = (messages[0] - '0') * 10 + (messages[1] - '0');
+
+	storage_type = g_core_fp.fp_determin_diag_storage(ts->diag_cmd);
+	rawdata_type = g_core_fp.fp_determin_diag_rawdata(ts->diag_cmd);
+
+	if (ts->diag_cmd > 0 && rawdata_type == 0) {
+		I("[Himax]ts->diag_cmd=0x%x ,storage_type=%d, rawdata_type=%d! Maybe no support!\n"
+		  , ts->diag_cmd, storage_type, rawdata_type);
+		ts->diag_cmd = 0x00;
+	} else
+		I("[Himax]ts->diag_cmd=0x%x ,storage_type=%d, rawdata_type=%d\n", ts->diag_cmd, storage_type, rawdata_type);
+
+	memset(diag_mutual, 0x00, x_channel * y_channel * sizeof(int32_t));
+	memset(diag_self, 0x00, sizeof(diag_self));
+	if (storage_type == 0 && rawdata_type >= RAW_IIR && rawdata_type < RAW_DUMP_COORD) {
+		I("%s,common\n", __func__);
+
+		if (DSRAM_Flag) {
+			/* 1. Clear DSRAM flag */
+			DSRAM_Flag = false;
+			/* 2. Stop DSRAM thread */
+			cancel_delayed_work(&private_ts->himax_diag_delay_wrok);
+			/* 3. Enable ISR */
+			himax_int_enable(1);
+			/* (4) FW leave sram and return to event stack */
+			g_core_fp.fp_return_event_stack();
+		}
+
+		if (g_switch_mode == 2) {
+			g_core_fp.fp_idle_mode(0);
+			g_switch_mode = g_core_fp.fp_switch_mode(0);
+		}
+
+		if (ts->diag_cmd == 0x04) {
+#if defined(HX_TP_PROC_2T2R)
+			command[0] = ts->diag_cmd;
+#else
+			ts->diag_cmd = 0x00;
+			command[0] = 0x00;
+#endif
+		} else
+			command[0] = ts->diag_cmd;
+
+		g_core_fp.fp_diag_register_set(command[0], storage_type);
+	} else if (storage_type > 0 && storage_type < 8
+			&& rawdata_type >= RAW_IIR && rawdata_type < RAW_DUMP_COORD) {
+		I("%s,dsram\n", __func__);
+		diag_max_cnt = 0;
+
+		/* 0. set diag flag */
+		if (DSRAM_Flag) {
+			/* (1) Clear DSRAM flag */
+			DSRAM_Flag = false;
+			/* (2) Stop DSRAM thread */
+			cancel_delayed_work(&private_ts->himax_diag_delay_wrok);
+			/* (3) Enable ISR */
+			himax_int_enable(1);
+			/* (4) FW leave sram and return to event stack */
+			g_core_fp.fp_return_event_stack();
+		}
+
+		/* close sorting if turn on */
+		if (g_switch_mode == 2) {
+			g_core_fp.fp_idle_mode(0);
+			g_switch_mode = g_core_fp.fp_switch_mode(0);
+		}
+
+		command[0] = rawdata_type;/* ts->diag_cmd; */
+		g_core_fp.fp_diag_register_set(command[0], storage_type);
+		/* 1. Disable ISR */
+		himax_int_enable(0);
+
+		/* Open file for save raw data log */
+		if (storage_type == 4) {
+			switch (rawdata_type) {
+			case RAW_IIR:
+				vts_name = getname_kernel(IIR_DUMP_FILE);
+				diag_sram_fn = file_open_name(vts_name, O_CREAT | O_WRONLY, 0);
+				break;
+
+			case RAW_DC:
+				vts_name = getname_kernel(DC_DUMP_FILE);
+				diag_sram_fn = file_open_name(vts_name, O_CREAT | O_WRONLY, 0);
+				break;
+
+			case RAW_BANK:
+				vts_name = getname_kernel(BANK_DUMP_FILE);
+				diag_sram_fn = file_open_name(vts_name, O_CREAT | O_WRONLY, 0);
+				break;
+
+			default:
+				I("%s raw data type is not true. raw data type is %d\n", __func__, rawdata_type);
+			}
+		}
+
+		/* 2. Start DSRAM thread */
+		queue_delayed_work(private_ts->himax_diag_wq, &private_ts->himax_diag_delay_wrok, 2 * HZ / 100);
+		I("%s: Start get raw data in DSRAM\n", __func__);
+
+		if (storage_type == 4)
+			msleep(6000);
+
+		/* 3. Set DSRAM flag */
+		DSRAM_Flag = true;
+
+	} else if (storage_type == 8) {
+		I("Soritng mode!\n");
+
+		if (DSRAM_Flag) {
+			/* 1. Clear DSRAM flag */
+			DSRAM_Flag = false;
+			/* 2. Stop DSRAM thread */
+			cancel_delayed_work(&private_ts->himax_diag_delay_wrok);
+			/* 3. Enable ISR */
+			himax_int_enable(1);
+			/* (4) FW leave sram and return to event stack */
+			g_core_fp.fp_return_event_stack();
+		}
+
+		g_core_fp.fp_idle_mode(1);
+		g_switch_mode = g_core_fp.fp_switch_mode(1);
+
+		if (g_switch_mode == 2)
+			g_core_fp.fp_diag_register_set(command[0], storage_type);
+
+		queue_delayed_work(private_ts->himax_diag_wq, &private_ts->himax_diag_delay_wrok, 2 * HZ / 100);
+		DSRAM_Flag = true;
+	} else {
+		/* set diag flag */
+		if (DSRAM_Flag) {
+			I("return and cancel sram thread!\n");
+			/* (1) Clear DSRAM flag */
+			DSRAM_Flag = false;
+			/* (2) Stop DSRAM thread */
+			cancel_delayed_work(&private_ts->himax_diag_delay_wrok);
+			/* (3) Enable ISR */
+			himax_int_enable(1);
+			/* (4) FW leave sram and return to event stack */
+			g_core_fp.fp_return_event_stack();
+		}
+
+		if (g_switch_mode == 2) {
+			g_core_fp.fp_idle_mode(0);
+			g_switch_mode = g_core_fp.fp_switch_mode(0);
+		}
+
+		if (ts->diag_cmd != 0x00) {
+			E("[Himax]ts->diag_cmd error!diag_command=0x%x so reset\n", ts->diag_cmd);
+			command[0] = 0x00;
+
+			if (ts->diag_cmd != 0x08)
+				ts->diag_cmd = 0x00;
+
+			g_core_fp.fp_diag_register_set(command[0], storage_type);
+		} else {
+			command[0] = 0x00;
+			ts->diag_cmd = 0x00;
+			g_core_fp.fp_diag_register_set(command[0], storage_type);
+			I("return to normal ts->diag_cmd=0x%x\n", ts->diag_cmd);
+		}
+	}
+
+	return 0;
+}
+
+
 static ssize_t himax_diag_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
 {
 	struct himax_ts_data *ts = private_ts;
@@ -1763,6 +2268,93 @@ static const struct file_operations himax_proc_diag_ops = {
 	.read = seq_read,
 	.write = himax_diag_write,
 };
+
+#ifdef NUBIA_TP_HIMAX_PROC_IIR_DATA
+static void *nubia_IIR_data_seq_start(struct seq_file *s, loff_t *pos)
+{
+    if (*pos>=1) return NULL;
+    return (void *)((unsigned long) *pos+1);
+}
+
+static void *nubia_IIR_data_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+    return NULL;
+}
+static void nubia_IIR_data_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int nubia_IIR_data_seq_read(struct seq_file *s, void *v)
+{
+    size_t count = 0;
+    uint16_t mutual_num, self_num, width;
+    int dsram_type = 0;
+    struct himax_ts_data *ts = private_ts;
+
+    if(ts->suspended){
+        I("%s: touch has suspended\n", __func__);
+        return count;
+    }
+
+    nubia_diag_write(1);
+    msleep(200);
+
+    dsram_type = g_diag_command/10;
+
+    mutual_num	= x_channel * y_channel;
+    self_num	= x_channel + y_channel; //don't add KEY_COUNT
+    width		= x_channel;
+    seq_printf(s, "ChannelStart: %4d, %4d\n\n", x_channel, y_channel);
+
+    // start to show out the raw data in adb shell
+    if ((g_diag_command >= 1 && g_diag_command <= 3) || (g_diag_command == 7))
+    {
+        himax_diag_arrange(s);
+        seq_printf(s, "\n");
+        seq_printf(s, "ChannelEnd");
+        seq_printf(s, "\n");
+    }
+
+    if((g_diag_command >= 1 && g_diag_command <= 7) || dsram_type > 0)
+    {
+        /* print Mutual/Slef Maximum and Minimum */
+        himax_get_mutual_edge();
+        himax_get_self_edge();
+        seq_printf(s, "Mutual Max:%3d, Min:%3d\n",g_max_mutual,g_min_mutual);
+        seq_printf(s, "Self Max:%3d, Min:%3d\n",g_max_self,g_min_self);
+
+        /* recovery status after print*/
+        g_max_mutual = 0;
+        g_min_mutual = 255;
+        g_max_self = 0;
+        g_min_self = 255;
+    }
+    /*pring state info*/
+    print_state_info(s);
+    return count;
+}
+
+static struct seq_operations nubia_IIR_data_seq_ops =
+{
+    .start	= nubia_IIR_data_seq_start,
+    .next	= nubia_IIR_data_seq_next,
+    .stop	= nubia_IIR_data_seq_stop,
+    .show	= nubia_IIR_data_seq_read,
+};
+
+static int nubia_IIR_data_proc_open(struct inode *inode, struct file *file)
+{
+    return seq_open(file, &nubia_IIR_data_seq_ops);
+};
+
+static struct file_operations nubia_IIR_data_ops =
+{
+    .owner = THIS_MODULE,
+    .open = nubia_IIR_data_proc_open,
+    .read = seq_read,
+};
+#endif
+
 
 static ssize_t himax_reset_write(struct file *file, const char __user *buff, size_t len, loff_t *pos)
 {
@@ -2277,6 +2869,337 @@ static const struct file_operations himax_proc_dd_debug_ops = {
 	.write = himax_proc_DD_debug_write,
 };
 
+#ifdef NUBIA_TP_HIMAX_PROC_USER_UPDATE
+static ssize_t nubia_user_update_read(struct file *file, char __user *buf, size_t len, loff_t *pos)
+{
+	size_t ret = 0;
+	char *temp_buf;
+
+	if (HX_PROC_SEND_FLAG) {
+		HX_PROC_SEND_FLAG = 0;
+		return 0;
+	}
+
+	temp_buf = kzalloc(len, GFP_KERNEL);
+	if (!temp_buf) {
+		E("%s: allocate memory failed!\n", __func__);
+		return 0;
+	}
+
+	if (debug_level_cmd == 't') {
+		if (fw_update_complete)
+			ret += snprintf(temp_buf + ret, len - ret, "FW Update Complete ");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "FW Update Fail ");
+
+	} else if (debug_level_cmd == 'h') {
+		if (handshaking_result == 0)
+			ret += snprintf(temp_buf + ret, len - ret, "Handshaking Result = %d (MCU Running)\n", handshaking_result);
+		else if (handshaking_result == 1)
+			ret += snprintf(temp_buf + ret, len - ret, "Handshaking Result = %d (MCU Stop)\n", handshaking_result);
+		else if (handshaking_result == 2)
+			ret += snprintf(temp_buf + ret, len - ret, "Handshaking Result = %d (I2C Error)\n", handshaking_result);
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "Handshaking Result = error\n");
+
+	} else if (debug_level_cmd == 'v') {
+		ret += snprintf(temp_buf + ret, len - ret, "FW_VER = 0x%2.2X\n", ic_data->vendor_fw_ver);
+
+		if (private_ts->chip_cell_type == CHIP_IS_ON_CELL)
+			ret += snprintf(temp_buf + ret, len - ret, "CONFIG_VER = 0x%2.2X\n", ic_data->vendor_config_ver);
+		else {
+			ret += snprintf(temp_buf + ret, len - ret, "TOUCH_VER = 0x%2.2X\n", ic_data->vendor_touch_cfg_ver);
+			ret += snprintf(temp_buf + ret, len - ret, "DISPLAY_VER = 0x%2.2X\n", ic_data->vendor_display_cfg_ver);
+		}
+		if (ic_data->vendor_cid_maj_ver < 0 && ic_data->vendor_cid_min_ver < 0)
+			ret += snprintf(temp_buf + ret, len - ret, "CID_VER = NULL\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "CID_VER = 0x%2.2X\n", (ic_data->vendor_cid_maj_ver << 8 | ic_data->vendor_cid_min_ver));
+
+		if (ic_data->vendor_panel_ver < 0)
+			ret += snprintf(temp_buf + ret, len - ret, "PANEL_VER = NULL\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "PANEL_VER = 0x%2.2X\n", ic_data->vendor_panel_ver);
+
+		ret += snprintf(temp_buf + ret, len - ret, "\n");
+		ret += snprintf(temp_buf + ret, len - ret, "Himax Touch Driver Version:\n");
+		ret += snprintf(temp_buf + ret, len - ret, "%s\n", HIMAX_DRIVER_VER);
+
+	} else if (debug_level_cmd == 'd') {
+		ret += snprintf(temp_buf + ret, len - ret, "Himax Touch IC Information :\n");
+		ret += snprintf(temp_buf + ret, len - ret, "%s\n", private_ts->chip_name);
+
+		switch (IC_CHECKSUM) {
+		case HX_TP_BIN_CHECKSUM_SW:
+			ret += snprintf(temp_buf + ret, len - ret, "IC Checksum : SW\n");
+			break;
+
+		case HX_TP_BIN_CHECKSUM_HW:
+			ret += snprintf(temp_buf + ret, len - ret, "IC Checksum : HW\n");
+			break;
+
+		case HX_TP_BIN_CHECKSUM_CRC:
+			ret += snprintf(temp_buf + ret, len - ret, "IC Checksum : CRC\n");
+			break;
+
+		default:
+			ret += snprintf(temp_buf + ret, len - ret, "IC Checksum error.\n");
+		}
+
+		if (ic_data->HX_INT_IS_EDGE)
+			ret += snprintf(temp_buf + ret, len - ret, "Driver register Interrupt : EDGE TIRGGER\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "Driver register Interrupt : LEVEL TRIGGER\n");
+
+		if (private_ts->protocol_type == PROTOCOL_TYPE_A)
+			ret += snprintf(temp_buf + ret, len - ret, "Protocol : TYPE_A\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "Protocol : TYPE_B\n");
+
+		ret += snprintf(temp_buf + ret, len - ret, "RX Num : %d\n", ic_data->HX_RX_NUM);
+		ret += snprintf(temp_buf + ret, len - ret, "TX Num : %d\n", ic_data->HX_TX_NUM);
+		ret += snprintf(temp_buf + ret, len - ret, "BT Num : %d\n", ic_data->HX_BT_NUM);
+		ret += snprintf(temp_buf + ret, len - ret, "X Resolution : %d\n", ic_data->HX_X_RES);
+		ret += snprintf(temp_buf + ret, len - ret, "Y Resolution : %d\n", ic_data->HX_Y_RES);
+		ret += snprintf(temp_buf + ret, len - ret, "Max Point : %d\n", ic_data->HX_MAX_PT);
+		ret += snprintf(temp_buf + ret, len - ret, "XY reverse : %d\n", ic_data->HX_XY_REVERSE);
+#ifdef HX_TP_PROC_2T2R
+
+		if (Is_2T2R) {
+			ret += snprintf(temp_buf + ret, len - ret, "2T2R panel\n");
+			ret += snprintf(temp_buf + ret, len - ret, "RX Num_2 : %d\n", HX_RX_NUM_2);
+			ret += snprintf(temp_buf + ret, len - ret, "TX Num_2 : %d\n", HX_TX_NUM_2);
+		}
+
+#endif
+	} else if (debug_level_cmd == 'i') {
+
+		if (g_core_fp.fp_read_i2c_status())
+			ret += snprintf(temp_buf + ret, len - ret, "I2C communication is bad.\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "I2C communication is good.\n");
+	} else if (debug_level_cmd == 'n') {
+
+		if (g_core_fp.fp_read_ic_trigger_type() == 1) /* Edgd = 1, Level = 0 */
+			ret += snprintf(temp_buf + ret, len - ret, "IC Interrupt type is edge trigger.\n");
+		else if (g_core_fp.fp_read_ic_trigger_type() == 0)
+			ret += snprintf(temp_buf + ret, len - ret, "IC Interrupt type is level trigger.\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "Unknown IC trigger type.\n");
+
+		if (ic_data->HX_INT_IS_EDGE)
+			ret += snprintf(temp_buf + ret, len - ret, "Driver register Interrupt : EDGE TIRGGER\n");
+		else
+			ret += snprintf(temp_buf + ret, len - ret, "Driver register Interrupt : LEVEL TRIGGER\n");
+	}
+
+	if (copy_to_user(buf, temp_buf, len))
+		I("%s,here:%d\n", __func__, __LINE__);
+
+	kfree(temp_buf);
+	HX_PROC_SEND_FLAG = 1;
+
+	return ret;
+}
+
+extern int g_ts_dbg;
+static ssize_t nubia_user_update_write(struct file *file, const char __user *buff, size_t len, loff_t *pos)
+{
+	int result = 0;
+	char fileName[128];
+	char buf[COMMON_BUF_SZ] = {0};
+	int fw_type = 0;
+	const struct firmware *fw = NULL;
+
+	if (len >= COMMON_BUF_SZ) {
+		I("%s: no command exceeds 80 chars.\n", __func__);
+		return -EFAULT;
+	}
+
+	if (copy_from_user(buf, buff, len))
+		return -EFAULT;
+
+	if (buf[0] == 'h') { /* handshaking */
+		debug_level_cmd = buf[0];
+		himax_int_enable(0);
+		 /* 0:Running, 1:Stop, 2:I2C Fail */
+		handshaking_result = g_core_fp.fp_hand_shaking();
+		himax_int_enable(1);
+		return len;
+	} else if (buf[0] == 'v') { /* firmware version */
+		himax_int_enable(0);
+#ifdef HX_RST_PIN_FUNC
+		g_core_fp.fp_ic_reset(false, false);
+#endif
+		debug_level_cmd = buf[0];
+		g_core_fp.fp_read_FW_ver();
+#ifdef HX_RST_PIN_FUNC
+		g_core_fp.fp_ic_reset(true, false);
+#endif
+		himax_int_enable(1);
+		/* himax_check_chip_version(); */
+		return len;
+	} else if (buf[0] == 'd') { /* ic information */
+		debug_level_cmd = buf[0];
+		return len;
+	} else if (buf[0] == 't') {
+		if (buf[1] == 's' && buf[2] == 'd'
+			&& buf[3] == 'b' && buf[4] == 'g') {
+			if (buf[5] == '1') {
+				I("Open Ts Debug!\n");
+				g_ts_dbg = 1;
+			} else if (buf[5] == '0') {
+				I("Close Ts Debug!\n");
+				g_ts_dbg = 0;
+			} else
+				E("Parameter fault for ts debug\n");
+			goto ENDFUCTION;
+		}
+		himax_int_enable(0);
+		debug_level_cmd	= buf[0];
+		fw_update_complete = false;
+		memset(fileName, 0, 128);
+		/* parse the file name */
+		snprintf(fileName, len - 2, "%s", &buf[2]);
+		I("%s: upgrade from file(%s) start!\n", __func__, fileName);
+		result = request_firmware(&fw, fileName, private_ts->dev);
+
+		if (result < 0) {
+			I("fail to request_firmware fwpath: %s (ret:%d)\n", fileName, result);
+			return result;
+		}
+
+		I("%s: FW image: %02X, %02X, %02X, %02X\n", __func__, fw->data[0], fw->data[1], fw->data[2], fw->data[3]);
+		fw_type = (fw->size) / 1024;
+		/* start to upgrade */
+		himax_int_enable(0);
+		I("Now FW size is : %dk\n", fw_type);
+
+		switch (fw_type) {
+		case 32:
+			if (g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_32k((unsigned char *)fw->data, fw->size, false) == 0) {
+				E("%s: TP upgrade error, line: %d\n", __func__, __LINE__);
+				fw_update_complete = false;
+			} else {
+				I("%s: TP upgrade OK, line: %d\n", __func__, __LINE__);
+				fw_update_complete = true;
+			}
+
+			break;
+
+		case 60:
+			if (g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_60k((unsigned char *)fw->data, fw->size, false) == 0) {
+				E("%s: TP upgrade error, line: %d\n", __func__, __LINE__);
+				fw_update_complete = false;
+			} else {
+				I("%s: TP upgrade OK, line: %d\n", __func__, __LINE__);
+				fw_update_complete = true;
+			}
+
+			break;
+
+		case 64:
+			if (g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_64k((unsigned char *)fw->data, fw->size, false) == 0) {
+				E("%s: TP upgrade error, line: %d\n", __func__, __LINE__);
+				fw_update_complete = false;
+			} else {
+				I("%s: TP upgrade OK, line: %d\n", __func__, __LINE__);
+				fw_update_complete = true;
+			}
+
+			break;
+
+		case 124:
+			if (g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_124k((unsigned char *)fw->data, fw->size, false) == 0) {
+				E("%s: TP upgrade error, line: %d\n", __func__, __LINE__);
+				fw_update_complete = false;
+			} else {
+				I("%s: TP upgrade OK, line: %d\n", __func__, __LINE__);
+				fw_update_complete = true;
+			}
+
+			break;
+
+		case 128:
+			if (g_core_fp.fp_fts_ctpm_fw_upgrade_with_sys_fs_128k((unsigned char *)fw->data, fw->size, false) == 0) {
+				E("%s: TP upgrade error, line: %d\n", __func__, __LINE__);
+				fw_update_complete = false;
+			} else {
+				I("%s: TP upgrade OK, line: %d\n", __func__, __LINE__);
+				fw_update_complete = true;
+			}
+
+			break;
+
+		default:
+			E("%s: Flash command fail: %d\n", __func__, __LINE__);
+			fw_update_complete = false;
+			break;
+		}
+		release_firmware(fw);
+		goto firmware_upgrade_done;
+	} else if (buf[0] == 'i' && buf[1] == '2' && buf[2] == 'c') {
+		/* i2c commutation */
+		debug_level_cmd = 'i';
+		return len;
+	} else if (buf[0] == 'i' && buf[1] == 'n' && buf[2] == 't') {
+		/* INT trigger */
+		debug_level_cmd = 'n';
+		return len;
+	}
+
+#ifdef HX_ZERO_FLASH
+
+	else if (buf[0] == 'z') {
+
+		if (buf[1] == '0')
+			g_core_fp.fp_0f_operation_check(0);
+		else
+			g_core_fp.fp_0f_operation_check(1);
+		return len;
+
+	} else if (buf[0] == 'p') {
+
+		I("NOW debug echo r!\n");
+		/* himax_program_sram(); */
+		private_ts->himax_0f_update_wq = create_singlethread_workqueue("HMX_update_0f_reqest_write");
+
+		if (!private_ts->himax_0f_update_wq)
+			E(" allocate syn_update_wq failed\n");
+
+		INIT_DELAYED_WORK(&private_ts->work_0f_update, g_core_fp.fp_0f_operation);
+		queue_delayed_work(private_ts->himax_0f_update_wq, &private_ts->work_0f_update, msecs_to_jiffies(100));
+		return len;
+	} else if (buf[0] == 'x') {
+		g_core_fp.fp_sys_reset();
+		return len;
+	}
+#endif
+	else { /* others,do nothing */
+		debug_level_cmd = 0;
+		return len;
+	}
+firmware_upgrade_done:
+	g_core_fp.fp_read_FW_ver();
+	g_core_fp.fp_touch_information();
+#ifdef HX_RST_PIN_FUNC
+	g_core_fp.fp_ic_reset(true, false);
+#else
+	g_core_fp.fp_sense_on(0x00);
+#endif
+	himax_int_enable(1);
+/*	todo himax_chip->tp_firmware_upgrade_proceed = 0; */
+/*	todo himax_chip->suspend_state = 0; */
+/*	todo enable_irq(himax_chip->irq); */
+ENDFUCTION:
+	return len;
+}
+static const struct file_operations nubia_proc_user_update_ops = {
+	.owner = THIS_MODULE,
+	.read = nubia_user_update_read,
+	.write = nubia_user_update_write,
+};
+#endif
 uint8_t getFlashCommand(void)
 {
 	return flash_command;
@@ -2698,6 +3621,7 @@ static const struct file_operations himax_proc_esd_cnt_ops = {
 };
 #endif
 
+
 static void himax_himax_data_init(void)
 {
 	debug_data->fp_ts_dbg_func = himax_ts_dbg_func;
@@ -2843,7 +3767,82 @@ int himax_touch_proc_init(void)
 	}
 
 #endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_IC_VER
+		nubia_proc_ic_ver_file = proc_create(NUBIA_PROC_IC_VER_FILE, (S_IRUGO),
+												himax_touch_proc_dir, &himax_proc_ic_ver_ops);
+		if(nubia_proc_ic_ver_file == NULL)
+		{
+			E(" %s: proc ic_ver file create failed!\n", __func__);
+			goto fail_20;
+		}
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_DC_DATA
+    nubia_proc_DC_data_file = proc_create(NUBIA_PROC_DC_DATA_FILE, (S_IWUSR|S_IRUGO),
+                                       himax_touch_proc_dir, &nubia_DC_data_ops);
+    if(nubia_proc_DC_data_file == NULL)
+    {
+        E(" %s: DC data file create failed!\n", __func__);
+        goto fail_21;
+    }
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_BASEDC_DATA
+    nubia_proc_BASEDC_data_file = proc_create(NUBIA_PROC_BASEDC_DATA_FILE, (S_IWUSR|S_IRUGO),
+                                       himax_touch_proc_dir, &nubia_BASEDC_data_ops);
+    if(nubia_proc_BASEDC_data_file == NULL)
+    {
+        E(" %s: BASEDC data file create failed!\n", __func__);
+        goto fail_22;
+    }
+#endif
+
+
+#ifdef NUBIA_TP_HIMAX_PROC_IIR_DATA
+		nubia_proc_IIR_data_file = proc_create(NUBIA_PROC_IIR_DATA_FILE, (S_IWUSR|S_IRUGO),
+										   himax_touch_proc_dir, &nubia_IIR_data_ops);
+		if(nubia_proc_IIR_data_file == NULL)
+		{
+			E(" %s: IIR data file create failed!\n", __func__);
+			goto fail_23;
+		}
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_USER_UPDATE
+		nubia_proc_user_update_file = proc_create(NUBIA_PROC_USER_UPDATE_FILE, (S_IWUSR|S_IRUGO),
+										   himax_touch_proc_dir, &nubia_proc_user_update_ops);
+		if(nubia_proc_user_update_file == NULL)
+		{
+			E(" %s: nubia_user_update_file create failed!\n", __func__);
+			goto fail_24;
+		}
+#endif
+
+#ifdef NUBIA_TP_HIMAX_PROC_IC_DETECT
+		nubia_proc_ic_detect_file = proc_create(NUBIA_PROC_IC_DETECT_FILE, (S_IRUGO),
+												himax_touch_proc_dir, &nubia_proc_ic_detect_ops);
+		if(nubia_proc_ic_detect_file == NULL)
+		{
+			E(" %s: proc ic_detect file create failed!\n", __func__);
+			goto fail_25;
+		}
+#endif
+
 	return 0;
+
+fail_25:
+	remove_proc_entry( NUBIA_PROC_IC_DETECT_FILE, himax_touch_proc_dir );
+fail_24:
+    remove_proc_entry(NUBIA_PROC_USER_UPDATE_FILE, himax_touch_proc_dir );
+fail_23:
+	remove_proc_entry(NUBIA_PROC_IIR_DATA_FILE,himax_touch_proc_dir);
+fail_22:
+	remove_proc_entry(NUBIA_PROC_BASEDC_DATA_FILE,himax_touch_proc_dir);
+fail_21:
+    remove_proc_entry(NUBIA_PROC_DC_DATA_FILE, himax_touch_proc_dir );	
+fail_20:
+    remove_proc_entry(NUBIA_PROC_IC_VER_FILE,himax_touch_proc_dir);
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_ITO_TEST)
 	remove_proc_entry(HIMAX_PROC_ITO_TEST_FILE, himax_touch_proc_dir);
 fail_19:

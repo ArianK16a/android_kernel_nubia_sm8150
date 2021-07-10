@@ -66,6 +66,14 @@
 #define HX_RST_PIN_FUNC
 #define HX_RESUME_SEND_CMD
 #define HX_ESD_RECOVERY
+#define NUBIA_TP_HIMAX_PROC_IC_VER
+#define NUBIA_TP_HIMAX_PROC_DC_DATA
+#define NUBIA_TP_HIMAX_PROC_BASEDC_DATA
+#define NUBIA_TP_HIMAX_PROC_IIR_DATA
+#define NUBIA_TP_HIMAX_PROC_USER_UPDATE
+#define NUBIA_TP_HIMAX_PROC_IC_DETECT
+
+
 #define HX_AUTO_UPDATE_FW
 /*#define HX_SMART_WAKEUP*/
 /*#define HX_GESTURE_TRACK*/
@@ -88,7 +96,6 @@
 /*#define HX_PLATFOME_DEFINE_KEY*/  /* for specific platform to set key(button) */
 #endif
 
-#define HX_TOUCH_ID_MAX 10
 #define HX_KEY_MAX_COUNT 4
 #define DEFAULT_RETRY_CNT 3
 
@@ -120,11 +127,11 @@
 
 #define SHIFTBITS 5
 
-#define FW_SIZE_32k 32768
-#define FW_SIZE_60k 61440
-#define FW_SIZE_64k 65536
-#define FW_SIZE_124k 126976
-#define FW_SIZE_128k 131072
+#define  FW_SIZE_32k 32768
+#define  FW_SIZE_60k 61440
+#define  FW_SIZE_64k 65536
+#define  FW_SIZE_124k 126976
+#define  FW_SIZE_128k 131072
 
 #define NO_ERR 0
 #define READY_TO_SERVE 1

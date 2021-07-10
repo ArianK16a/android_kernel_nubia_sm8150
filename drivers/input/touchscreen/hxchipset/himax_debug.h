@@ -14,8 +14,8 @@
  *
  */
 
-#ifndef H_HIMAX_DEBUG
-#define H_HIMAX_DEBUG
+//#ifndef H_HIMAX_DEBUG
+//#define H_HIMAX_DEBUG
 
 #include "himax_platform.h"
 #include "himax_common.h"
@@ -26,6 +26,13 @@
 #define HIMAX_PROC_INT_EN_FILE "int_en"
 #define HIMAX_PROC_LAYOUT_FILE "layout"
 #define HIMAX_PROC_CRC_TEST_FILE "CRC_test"
+#define NUBIA_PROC_IC_DETECT_FILE "ic_detect"
+#define NUBIA_PROC_IC_VER_FILE	"ic_ver"
+#define NUBIA_PROC_DC_DATA_FILE	"DC_data"
+#define NUBIA_PROC_BASEDC_DATA_FILE	"BASEDC_data"
+#define NUBIA_PROC_IIR_DATA_FILE	"IIR_data"
+#define NUBIA_PROC_USER_UPDATE_FILE	"user_update"
+
 
 #ifdef HX_ESD_RECOVERY
 extern u8 HX_ESD_RESET_ACTIVATE;
@@ -57,4 +64,3 @@ extern void ito_set_result_status(uint8_t status);
 extern uint8_t ito_get_result_status(void);
 #endif
 
-#endif
